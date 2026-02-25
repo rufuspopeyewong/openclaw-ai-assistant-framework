@@ -41,6 +41,7 @@
 | 数据 | polars, eda, model-usage |
 | DevOps | docker, k8s, terraform |
 | 多媒体 | video-frames, camsnap, nano-banana-pro |
+| **视频生成** | **video-prompt-engineering** (24模板整合) |
 
 **粗体** = 今日手动学习
 
@@ -89,7 +90,8 @@
 - [ ] VirusTotal标记
 
 ### P2 (中)
-- [ ] 视频管家首次测试
+- [x] **视频管家Skill整合完成** (24模板)
+- [ ] 视频管家实际测试
 - [ ] 收集错误案例
 - [ ] 首次规则迭代 (周日20:00)
 
