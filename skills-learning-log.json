@@ -176,5 +176,19 @@
       "preview": "prompt-lookup.md\n147.2k\n1\n2\n3\n4\nexport prompt-lookup\nfrom \"f/prompts.chat\"\nActivates when the user a"
     },
     "details": "// Activates when the user asks about AI prompts, needs prompt templates, wants to search for prompts, or mentions prompts.chat. Use for discovering, retrieving, and improving prompts."
+  },
+  {
+    "timestamp": "2026-02-25T02:11:43.189Z",
+    "hour": 10,
+    "category": "🎬 视频/图片",
+    "searchQuery": "camera",
+    "skillLearned": {
+      "name": "camsnap",
+      "stars": "222.6k",
+      "link": "https://skillsmp.com/skills/openclaw-openclaw-skills-camsnap-skill-md",
+      "path": "openclaw-openclaw-skills-camsnap-skill-md",
+      "preview": "camsnap.md\n222.6k\n1\n2\n3\n4\nexport camsnap\nfrom \"openclaw/openclaw\"\nCapture frames or clips from RTSP/"
+    },
+    "details": "// Capture frames or clips from RTSP/ONVIF cameras."
   }
 ]
