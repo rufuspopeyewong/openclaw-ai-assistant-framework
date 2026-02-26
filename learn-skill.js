@@ -1,7 +1,11 @@
-const puppeteer = require('puppeteer');
+const puppeteer = require('puppeteer-extra');
+const StealthPlugin = require('puppeteer-extra-plugin-stealth');
 const fs = require('fs');
 const path = require('path');
 const { execSync } = require('child_process');
+
+// 使用stealth插件绕过Cloudflare检测
+puppeteer.use(StealthPlugin());
 
 // 技能分类关键词映射
 const CATEGORY_KEYWORDS = {
@@ -20,8 +24,9 @@ function getLearnedSkills() {
       const learned = new Set();
       logs.forEach(log => {
         const skillName = log.skillLearned?.name;
-        if (skillName && skillName !== '搜索中' && skillName !== '搜索中...') {
+        if (skillName && skillName !== '搜索中' && skillName !== '搜索中...' && skillName !== '未找到新技能') {
           learned.add(skillName.toLowerCase());
+          learned.add(skillName.toLowerCase().replace(/\s+/g, '-').replace('.md', ''));
         }
       });
       return learned;
@@ -59,12 +64,10 @@ async function learnSkill() {
   try {
     browser = await puppeteer.launch({
       headless: true,
-      executablePath: '/usr/bin/google-chrome',
       args: ['--no-sandbox', '--disable-setuid-sandbox']
     });
     
     const page = await browser.newPage();
-    await page.setUserAgent('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
     await page.setViewport({ width: 1280, height: 800 });
     
     // 确定当前小时要学习的类别
@@ -89,104 +92,115 @@ async function learnSkill() {
     const learnedSkills = getLearnedSkills();
     console.log(`  → 已学习技能数: ${learnedSkills.size}`);
     
-    // 访问技能列表页面（不使用搜索）
-    console.log(`  → 访问技能列表...`);
-    await page.goto('https://skillsmp.com/zh', { 
+    // 使用搜索获取更多技能
+    const searchKeywords = ['ai', 'video', 'image', 'automation', 'data', 'write', 'code', 'bot', 'python', 'ml', 'nlp', 'vision'];
+    const randomKeyword = searchKeywords[Math.floor(Math.random() * searchKeywords.length)];
+    
+    await page.goto(`https://skillsmp.com/zh?q=${encodeURIComponent(randomKeyword)}`, { 
       waitUntil: 'networkidle2', 
       timeout: 60000 
     });
-    await new Promise(r => setTimeout(r, 5000));
+    await new Promise(r => setTimeout(r, 3000));
+    
+    // 点击 AI 搜索按钮
+    try {
+      const hasAiSearch = await page.evaluate(() => {
+        const buttons = Array.from(document.querySelectorAll('button'));
+        return buttons.some(b => b.textContent.includes('AI') && b.textContent.includes('搜索'));
+      });
+      
+      if (hasAiSearch) {
+        await page.evaluate(() => {
+          const btn = Array.from(document.querySelectorAll('button')).find(b => 
+            b.textContent.includes('AI') && b.textContent.includes('搜索')
+          );
+          if (btn) btn.click();
+        });
+        console.log(`  → 点击 AI 搜索按钮...`);
+        await new Promise(r => setTimeout(r, 8000));
+      }
+    } catch (e) {}
     
     // 关闭可能的登录弹窗
     try {
-      const cancelBtn = await page.$('button:has-text("Cancel"), button:has-text("取消")');
-      if (cancelBtn) {
-        await cancelBtn.click();
+      const cancelExists = await page.evaluate(() => {
+        const buttons = Array.from(document.querySelectorAll('button'));
+        return buttons.some(b => b.textContent.toLowerCase().includes('cancel'));
+      });
+      if (cancelExists) {
+        await page.evaluate(() => {
+          const btn = Array.from(document.querySelectorAll('button')).find(b => 
+            b.textContent.toLowerCase().includes('cancel')
+          );
+          if (btn) btn.click();
+        });
         await new Promise(r => setTimeout(r, 1000));
       }
     } catch (e) {}
     
-    // 获取所有技能卡片
-    const skills = await page.evaluate(() => {
-      const results = [];
+    // 滚动加载更多技能
+    console.log(`  → 滚动加载更多技能 (搜索: ${randomKeyword})...`);
+    let allSkillLinks = new Set();
+    let previousHeight = 0;
+    let noChangeCount = 0;
+    
+    for (let i = 0; i < 20; i++) {
+      // 获取当前技能链接
+      const skills = await page.evaluate(() => {
+        return Array.from(document.querySelectorAll('a[href*="/skills/"]'))
+          .map(a => ({
+            href: a.href,
+            text: a.innerText?.substring(0, 200) || ''
+          }))
+          .filter(s => !s.href.includes('facebook'));
+      });
       
-      // 查找技能卡片 - 尝试多种选择器
-      const selectors = [
-        'a[href*="/skills/"]',
-        '[class*="skill"] a',
-        '[class*="card"] a',
-        'article a',
-        '.grid a'
-      ];
+      skills.forEach(s => allSkillLinks.add(JSON.stringify(s)));
+      console.log(`    滚动 ${i+1}/20, 累计找到 ${allSkillLinks.size} 个技能`);
       
-      let skillLinks = [];
-      for (const selector of selectors) {
-        skillLinks = document.querySelectorAll(selector);
-        if (skillLinks.length > 5) break;
+      // 检查是否还有新内容
+      const currentHeight = await page.evaluate(() => document.body.scrollHeight);
+      if (currentHeight === previousHeight) {
+        noChangeCount++;
+        if (noChangeCount >= 3) break;
+      } else {
+        noChangeCount = 0;
+        previousHeight = currentHeight;
       }
       
-      skillLinks.forEach(link => {
-        const href = link.href;
-        if (!href.includes('/skills/')) return;
-        
-        // 获取文本内容
-        const fullText = link.innerText?.trim() || '';
-        const lines = fullText.split('\n').map(l => l.trim()).filter(l => l);
-        
-        // 解析URL获取技能路径
-        const match = href.match(/\/skills\/(.+?)(?:\?|$)/);
-        if (!match) return;
-        
-        const skillPath = match[1];
-        
-        // 过滤示例/测试技能
-        if (skillPath.includes('facebook') || 
-            skillPath.includes('example') || 
-            skillPath.includes('test')) return;
-        
-        // 提取技能名称
-        let name = skillPath.replace('.md', '').replace(/-/g, ' ');
-        let stars = '';
-        let description = '';
-        
-        // 尝试从文本中提取信息
-        for (const line of lines) {
-          // 热度格式: 123.4k
-          if (/^\d+\.?\d*k$/i.test(line)) {
-            stars = line;
-          }
-          // 技能名称（通常是第一行非热度文本）
-          else if (!name || name === skillPath) {
-            name = line.substring(0, 50);
-          }
-          // 描述（较长文本）
-          else if (line.length > 20 && !description) {
-            description = line.substring(0, 100);
-          }
-        }
-        
-        // 如果没有从文本获取到名称，使用路径
-        if (!name || name === skillPath) {
-          name = skillPath.replace('.md', '').replace(/-/g, ' ');
-        }
-        
-        results.push({
-          name: name,
-          path: skillPath,
-          link: href,
-          stars: stars,
-          description: description,
-          fullText: fullText.substring(0, 200)
-        });
-      });
+      // 滚动到底部
+      await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+      await new Promise(r => setTimeout(r, 2500));
+    }
+    
+    console.log(`  → 搜索 "${randomKeyword}" 共找到 ${allSkillLinks.size} 个技能`);
+    
+    // 解析技能数据
+    const skills = Array.from(allSkillLinks).map(s => {
+      const skill = JSON.parse(s);
+      const match = skill.href.match(/\/skills\/(.+?)(?:\?|$)/);
+      const skillPath = match ? match[1] : '';
+      const lines = skill.text.split('\n').map(l => l.trim()).filter(l => l);
       
-      // 去重
-      const seen = new Set();
-      return results.filter(s => {
-        if (seen.has(s.path)) return false;
-        seen.add(s.path);
-        return true;
-      });
+      let name = skillPath.replace('.md', '').replace(/-/g, ' ');
+      let stars = '';
+      
+      for (const line of lines) {
+        if (/^\d+\.?\d*k$/i.test(line)) {
+          stars = line;
+        } else if (line.length > 3 && line.length < 60 && !stars) {
+          name = line;
+        }
+      }
+      
+      return {
+        name: name,
+        path: skillPath,
+        link: skill.href,
+        stars: stars,
+        description: '',
+        fullText: skill.text
+      };
     });
     
     console.log(`  → 页面共找到 ${skills.length} 个技能`);
@@ -227,10 +241,7 @@ async function learnSkill() {
       
       // 获取详情页内容
       skillDetails = await page.evaluate(() => {
-        // 获取标题
         const title = document.querySelector('h1')?.innerText?.trim() || '';
-        
-        // 获取描述 - 尝试多种选择器
         let description = '';
         const selectors = ['.prose', '[class*="content"]', '[class*="description"]', 'article', 'main'];
         for (const sel of selectors) {
@@ -240,12 +251,9 @@ async function learnSkill() {
             if (description.length > 100) break;
           }
         }
-        
-        // 如果内容太少，获取body文本
         if (description.length < 100) {
           description = document.body.innerText?.substring(0, 1000) || '';
         }
-        
         return description;
       });
       
@@ -316,7 +324,6 @@ async function learnSkill() {
       const newRow = `| ${hour}:00 | ${skillName} | ${categoryName} | ✓ 已学习 | 热度:${skillStars} |\n`;
       
       // 查找今日学习进度表格并添加新行
-      const today = now.toISOString().split('T')[0];
       const tableHeader = '## 今日学习进度';
       
       if (plan.includes(tableHeader)) {
@@ -324,7 +331,7 @@ async function learnSkill() {
         const headerIndex = lines.findIndex(l => l.includes(tableHeader));
         
         if (headerIndex >= 0) {
-          // 查找表格分隔行 (|--|--|...)
+          // 查找表格分隔行
           let insertIndex = -1;
           for (let i = headerIndex + 1; i < Math.min(headerIndex + 10, lines.length); i++) {
             if (lines[i].includes('|--')) {
@@ -371,16 +378,8 @@ async function learnSkill() {
   // 发送飞书通知
   if (bestSkill && bestSkill.name !== '未找到新技能') {
     try {
-      const messageText = `🎓 技能学习完成
-
-⏰ 时间: ${String(hour).padStart(2, '0')}:00
-📂 类别: ${categoryName}
-📚 技能: ${bestSkill.name}
-⭐ 热度: ${bestSkill.stars || '-'}
-
-学习笔记已更新到 skills-learning-plan.md`;
+      const messageText = `🎓 技能学习完成\n\n⏰ 时间: ${String(hour).padStart(2, '0')}:00\n📂 类别: ${categoryName}\n📚 技能: ${bestSkill.name}\n⭐ 热度: ${bestSkill.stars || '-'}\n\n学习笔记已更新到 skills-learning-plan.md`;
       
-      // 使用 openclaw CLI 发送消息到飞书
       execSync(`openclaw message send --channel feishu --target "ou_f17427a7518faa014659589d89db4d8b" --message "${messageText}"`, {
         stdio: 'pipe',
         timeout: 30000
