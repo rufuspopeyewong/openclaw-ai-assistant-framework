@@ -213,10 +213,32 @@ def send_to_telegram(report_file, summary_text):
         return False
 
 def sync_to_feishu(content, title):
-    """同步到飞书Wiki"""
+    """同步到飞书Wiki - 使用openclaw命令"""
     try:
-        log(f"⏳ 飞书同步待处理: {title}")
-        log(f"   目标: https://acnh7t5exjqh.feishu.cn/wiki/FcvTwZTTyiCZ30kNLRVchfiwnKd")
+        log(f"🔄 正在同步到飞书: {title}")
+        
+        # 保存到临时文件
+        temp_file = f'/tmp/daily_report_{datetime.now().strftime("%Y%m%d")}.md'
+        with open(temp_file, 'w', encoding='utf-8') as f:
+            f.write(content)
+        
+        # 使用openclaw命令创建飞书文档
+        import subprocess
+        result = subprocess.run(
+            ['openclaw', 'feishu', 'doc', 'create-and-write',
+             '--folder', 'FcvTwZTTyiCZ30kNLRVchfiwnKd',
+             '--title', title,
+             '--content', temp_file],
+            capture_output=True,
+            text=True
+        )
+        
+        if result.returncode == 0:
+            log(f"✅ 飞书同步成功")
+            status = 'success'
+        else:
+            log(f"⚠️ 飞书同步返回: {result.stderr or result.stdout}")
+            status = 'partial'
         
         # 记录同步日志
         sync_log = '/home/zzyuzhangxing/.openclaw/workspace/logs/feishu_sync.log'
@@ -226,11 +248,17 @@ def sync_to_feishu(content, title):
             f.write(json.dumps({
                 'timestamp': datetime.now().isoformat(),
                 'title': title,
-                'status': 'pending',
+                'status': status,
                 'target': 'daily-report-wiki'
             }) + '\n')
         
-        return True
+        # 清理临时文件
+        try:
+            os.remove(temp_file)
+        except:
+            pass
+        
+        return status == 'success'
     except Exception as e:
         log(f"❌ 飞书同步失败: {e}", 'ERROR')
         return False

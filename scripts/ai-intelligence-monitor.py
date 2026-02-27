@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-泛AI情报监控脚本 - 全站搜索版
+泛AI情报监控脚本 - 全站搜索版 (修复版)
 监控范围: B站全站AI相关内容（所有分区）
-搜索策略: 多关键词并行搜索，覆盖全站AI热点
+搜索策略: 多关键词并行搜索，覆盖全站AI热点，筛选最近7天
 """
 
 import json
@@ -80,8 +80,13 @@ for category, words in AI_KEYWORDS.items():
 # 去重并保持顺序
 ALL_KEYWORDS = list(OrderedDict.fromkeys(ALL_KEYWORDS))
 
-def search_bilibili(keyword, page=1, page_size=20):
-    """使用B站搜索API搜索视频"""
+def search_bilibili(keyword, page=1, page_size=20, days_back=7):
+    """使用B站搜索API搜索视频 - 带时间筛选"""
+    
+    # 计算时间范围（Unix时间戳）
+    now = int(time.time())
+    pubdate_begin = now - (days_back * 24 * 60 * 60)  # N天前
+    pubdate_end = now
     
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -94,9 +99,11 @@ def search_bilibili(keyword, page=1, page_size=20):
         'keyword': keyword,
         'page': page,
         'page_size': page_size,
-        'order': 'click',  # 按点击量排序
+        'order': 'click',  # 按点击量排序（在最新中找最热）
         'duration': '0',   # 全部时长
         'tids': '0',       # 全部分区
+        'pubdate_begin': pubdate_begin,  # 发布时间开始
+        'pubdate_end': pubdate_end,      # 发布时间结束
     }
     
     try:
@@ -105,7 +112,9 @@ def search_bilibili(keyword, page=1, page_size=20):
         data = response.json()
         
         if data.get('code') == 0:
-            return data.get('data', {}).get('result', [])
+            results = data.get('data', {}).get('result', [])
+            log(f"  '{keyword}' 找到 {len(results)} 条 (近{days_back}天)")
+            return results
         else:
             log(f"搜索'{keyword}'失败: {data.get('message', '未知错误')}", 'WARN')
     except requests.exceptions.HTTPError as e:
@@ -276,17 +285,51 @@ def analyze_trends(videos):
     
     return category_mentions, suggestions
 
+def format_pubdate(pubdate_ts):
+    """格式化发布时间为友好字符串"""
+    if not pubdate_ts:
+        return "未知"
+    
+    now = int(time.time())
+    diff = now - pubdate_ts
+    
+    if diff < 3600:
+        return f"{diff // 60}分钟前"
+    elif diff < 86400:
+        return f"{diff // 3600}小时前"
+    elif diff < 7 * 86400:
+        return f"{diff // 86400}天前"
+    else:
+        return f"{diff // 86400}天前"
+
 def generate_report(videos, category_mentions, suggestions, search_stats):
-    """生成日报"""
+    """生成日报 - 只显示最近7天内发布的视频"""
     
     today = datetime.now().strftime('%Y-%m-%d')
     timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    now_ts = int(time.time())
+    seven_days_ago = now_ts - (7 * 24 * 60 * 60)
+    
+    # 筛选最近7天的视频
+    recent_videos = [v for v in videos if v.get('pubdate', 0) >= seven_days_ago]
+    recent_videos.sort(key=calculate_hot_score, reverse=True)
+    
+    # 统计
+    total_recent = len(recent_videos)
+    total_all = len(videos)
+    
+    if total_recent == 0:
+        time_note = "⚠️ 未找到7天内发布的视频，显示全部搜索结果中热度最高的"
+        display_videos = videos[:10]
+    else:
+        time_note = f"✅ 已筛选最近7天内发布的视频 ({total_recent}/{total_all}条)"
+        display_videos = recent_videos[:10]
     
     report = f"""# 📡 泛AI情报日报 - {today}
 
 > **生成时间**: {timestamp}  
 > **监控范围**: B站全站AI相关内容  
-> **数据来源**: OpenClaw全站搜索
+> **数据筛选**: {time_note}
 
 ---
 
@@ -295,10 +338,10 @@ def generate_report(videos, category_mentions, suggestions, search_stats):
 | 指标 | 数值 |
 |------|------|
 | 🔍 搜索关键词 | {len(ALL_KEYWORDS)} 个 |
-| 📹 发现视频 | {len(videos)} 条 |
-| 👁️  总播放量 | {sum(v.get('view', 0) for v in videos):,} |
-| ❤️  总点赞数 | {sum(v.get('like', 0) for v in videos):,} |
-| 📤 总分享数 | {sum(v.get('share', 0) for v in videos):,} |
+| 📹 发现视频 | {total_all} 条 |
+| 📅 近7天视频 | {total_recent} 条 |
+| 👁️ 总播放量 | {sum(v.get('view', 0) for v in videos):,} |
+| ❤️ 总点赞数 | {sum(v.get('like', 0) for v in videos):,} |
 
 ---
 
@@ -308,7 +351,6 @@ def generate_report(videos, category_mentions, suggestions, search_stats):
 |------|---------|-----------|
 """
     
-    # 生成分类统计
     category_names = {
         'core_ai': '🧠 核心AI大模型',
         'china_llm': '🇨🇳 国产大模型',
@@ -330,15 +372,16 @@ def generate_report(videos, category_mentions, suggestions, search_stats):
     report += f"""
 ---
 
-## 🔥 Top 10 AI热门视频
+## 🔥 Top 10 AI热门视频 (近7天)
 
 """
     
     # Top 10视频
-    for i, v in enumerate(videos[:10], 1):
+    for i, v in enumerate(display_videos, 1):
+        pub_str = format_pubdate(v.get('pubdate', 0))
         report += f"""### {i}. {v['title'][:60]}
 - **UP主**: {v['author']} ({v.get('typename', '未知分区')})
-- **数据**: 👁️ {v['view']:,} | 👍 {v['like']:,} | 📤 {v['share']:,}
+- **数据**: 👁️ {v['view']:,} | 👍 {v['like']:,} | 📤 {v['share']:,} | 📅 {pub_str}
 - **链接**: {v['link']}
 - **简介**: {v['desc'][:100]}...
 
@@ -363,7 +406,8 @@ def generate_report(videos, category_mentions, suggestions, search_stats):
 
 **关键词覆盖**: {len(ALL_KEYWORDS)} 个泛AI相关关键词
 **搜索分区**: 全站（所有分区）
-**排序方式**: 按播放量
+**时间筛选**: 最近7天内发布
+**排序方式**: 按综合热度（播放+互动加权）
 **去重策略**: 按BVID去重，保留热度最高
 
 ---
@@ -382,7 +426,7 @@ def main():
     
     log(f"🕐 监控时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     log(f"🎯 关键词数量: {len(ALL_KEYWORDS)} 个")
-    log(f"🔍 搜索策略: 全站覆盖 + 多关键词并行")
+    log(f"🔍 搜索策略: 全站覆盖 + 多关键词并行 + 7天时间筛选")
     
     all_videos = []
     search_stats = {}
@@ -397,7 +441,7 @@ def main():
     log("🔍 开始搜索核心关键词...")
     for i, keyword in enumerate(priority_keywords, 1):
         log(f"[{i}/{len(priority_keywords)}] 搜索: '{keyword}'...")
-        results = search_bilibili(keyword, page=1, page_size=20)
+        results = search_bilibili(keyword, page=1, page_size=20, days_back=7)
         
         if results:
             videos = parse_search_result(results)
@@ -412,15 +456,26 @@ def main():
     
     log(f"📊 原始数据: {len(all_videos)} 条视频")
     
-    # 去重
+    # 客户端时间筛选（API参数不生效，需二次过滤）
+    now_ts = int(time.time())
+    seven_days_ago = now_ts - (7 * 24 * 60 * 60)
+    
+    # 筛选最近7天发布的视频
+    recent_videos = [v for v in all_videos if v.get('pubdate', 0) >= seven_days_ago]
+    log(f"📅 近7天筛选: {len(recent_videos)} 条视频")
+    
+    # 如果7天内视频太少(<5条)，尝试放宽到30天
+    if len(recent_videos) < 5:
+        thirty_days_ago = now_ts - (30 * 24 * 60 * 60)
+        recent_videos = [v for v in all_videos if v.get('pubdate', 0) >= thirty_days_ago]
+        log(f"📅 放宽到30天: {len(recent_videos)} 条视频")
+    
+    # 去重（在时间筛选后的数据上）
     log("🔄 正在去重...")
-    unique_videos = deduplicate_videos(all_videos)
+    unique_videos = deduplicate_videos(recent_videos if recent_videos else all_videos)
     log(f"✅ 去重后: {len(unique_videos)} 条视频")
     
-    # 按热度排序
-    unique_videos.sort(key=calculate_hot_score, reverse=True)
-    
-    # 分析趋势
+    # 分析趋势（在去重后的数据上）
     log("📈 正在分析趋势...")
     category_mentions, suggestions = analyze_trends(unique_videos)
     
@@ -439,30 +494,30 @@ def main():
     report_file = f"{data_dir}/daily_report_{today}_{timestamp}.md"
     with open(report_file, 'w', encoding='utf-8') as f:
         f.write(report)
-    log(f"✅ 报告已保存: {report_file}")
     
-    # 保存最新版本
+    # 保存最新报告
     latest_file = f"{data_dir}/daily_report_latest.md"
     with open(latest_file, 'w', encoding='utf-8') as f:
         f.write(report)
-    log(f"✅ 最新报告: {latest_file}")
     
-    # 输出摘要
+    # 统计近7天视频数
+    now_ts = int(time.time())
+    seven_days_ago = now_ts - (7 * 24 * 60 * 60)
+    recent_count = len([v for v in unique_videos if v.get('pubdate', 0) >= seven_days_ago])
+    
     log("=" * 70)
     log("📊 监控摘要")
     log("=" * 70)
     log(f"📹 发现视频: {len(unique_videos)} 条")
+    log(f"📅 近7天视频: {recent_count} 条")
     log(f"👁️  总播放量: {sum(v.get('view', 0) for v in unique_videos):,}")
     log(f"❤️  总点赞数: {sum(v.get('like', 0) for v in unique_videos):,}")
     log(f"💡 选题建议: {len(suggestions)} 条")
-    
-    # Top 3 快速预览
-    log("🔥 Top 3 AI热门视频:")
-    for i, v in enumerate(unique_videos[:3], 1):
-        log(f"  {i}. {v['title'][:50]}... ({v['view']:,}播放)")
-    
-    log("=" * 70)
-    log("✅ 全站AI情报监控完成!")
+    if unique_videos:
+        top_video = max(unique_videos, key=lambda x: x.get('view', 0))
+        pub_str = format_pubdate(top_video.get('pubdate', 0))
+        log(f"🔥 Top 1: {top_video['title'][:40]}... ({top_video['view']:,}播放, {pub_str})")
+    log(f"✅ 报告已保存: {report_file}")
     log("=" * 70)
 
 if __name__ == "__main__":
@@ -470,6 +525,6 @@ if __name__ == "__main__":
         main()
         sys.exit(0)
     except Exception as e:
-        log(f"❌ 监控脚本异常: {e}", 'ERROR')
+        log(f"❌ 监控异常: {e}", 'ERROR')
         traceback.print_exc()
         sys.exit(1)
