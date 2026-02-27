@@ -16,6 +16,10 @@
     "image": {
       "version": "1.0.3",
       "installedAt": 1771933217544
+    },
+    "tavily-search": {
+      "version": "1.0.0",
+      "installedAt": 1772177151806
     }
   }
 }

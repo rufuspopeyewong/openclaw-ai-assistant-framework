@@ -32,6 +32,20 @@
 **脚本**: `scripts/run-skill-learning.sh` → `learn-skill-v2.js` (修复版)  
 **说明**: 从SkillsMP搜索并学习新技能（修复版，每次可学5个）
 
+### install_next_skill
+**触发**: 每小时整点（与技能学习交替或同时进行）  
+**执行方式**: 系统 cron  
+**操作**:
+```bash
+# 读取 skills-install-plan.md，按顺序安装下一个待安装技能
+# 安装完成后更新状态并发送飞书消息报告
+# shell技能安装后配置为运行危险命令时需用户确认
+```
+**说明**: 自动安装18个指定技能（每小时1个）
+**技能清单**: 见 skills-install-plan.md
+**安装顺序**: tavily-search → anthroics/skill-creator → notion → obsidian → brave-search → agent-browser → find-skills → self-improving-agent → skill-vetter → bird → 香蕉自媒体 → baoyu-skills → planning-with-files → proactive-agent → automation-workflows → Rube MCP Connector → remotion-best-practices
+**总数**: 18个（去重后，github/shell已有）
+
 ### fetch_bilibili_account
 **触发**: 每天 09:00
 **操作**:
