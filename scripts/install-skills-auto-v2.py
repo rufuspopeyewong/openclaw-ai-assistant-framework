@@ -121,6 +121,11 @@ def main():
     current_idx = status.get('current_index', 0)
     status['total_attempts'] = status.get('total_attempts', 0) + 1
     
+    # 初始化结果变量
+    result = 'skipped'
+    detail = '无技能需要安装'
+    skill_name = '无'
+    
     # 跳过已安装的技能
     while current_idx < len(SKILLS_TO_INSTALL):
         skill = SKILLS_TO_INSTALL[current_idx]
@@ -177,14 +182,27 @@ def main():
     log("=" * 70)
     
     # 生成报告
-    msg = f"""📦 技能安装报告
+    if current_idx >= len(SKILLS_TO_INSTALL):
+        # 所有技能已安装完成
+        msg = f"""📦 技能安装报告
 
-本次安装: {SKILLS_TO_INSTALL[current_idx-1]['name'] if current_idx > 0 else '无'}
-结果: {'✅ 成功' if result == 'success' else '⚠️ 部分' if result == 'partial' else '❌ 失败'}
-验证: {detail[:50]}
+✅ 所有技能安装完成！
 
 总进度: {current_idx}/{len(SKILLS_TO_INSTALL)}
 已安装: {len(status['installed'])}
+失败: {len(status['failed'])}
+
+任务状态: 完成 🎉
+"""
+    else:
+        msg = f"""📦 技能安装报告
+
+本次安装: {skill_name}
+结果: {'✅ 成功' if result == 'success' else '⚠️ 部分' if result == 'partial' else '⏭️ 跳过' if result == 'skipped' else '❌ 失败'}
+验证: {detail[:50] if detail else 'N/A'}
+
+总进度: {current_idx}/{len(SKILLS_TO_INSTALL)}
+已安装: {len([s for s in status['installed'] if '已存在' not in s.get('note', '')])}
 失败: {len(status['failed'])}
 
 下次安装: {SKILLS_TO_INSTALL[current_idx]['name'] if current_idx < len(SKILLS_TO_INSTALL) else '完成'}
