@@ -1,54 +1,53 @@
-# Gitignore - 防止个人信息上传到GitHub
+# Gitignore - OpenClaw AI Assistant Framework
 
 # 个人配置文件
 IDENTITY.md
 USER.md
-HEARTBEAT.md
+MEMORY.md
+AGENTS.md
+SOUL.md
+TOOLS.md
 
 # 记忆文件
 memory/
-*.md
-!docs/*.md
 
 # 数据文件
 data/
+*.json
+!config/model-pools.json
+!config/skill-learning-schedule.json
+
+# 日志文件
 logs/
-
-# 配置文件
-config/
-
-# 脚本文件（保留框架脚本）
-scripts/
-!scripts/smart-backup.sh
-!scripts/model-health-check.py
-!scripts/daily-evolution.py
-!scripts/heartbeat-check.py
-!scripts/extract-skill-knowledge.py
-!scripts/install-skills-infinite.py
-
-# 技能文件
-skills/
+*.log
 
 # 备份文件
 backups/
 *.backup
 *.bak
 
+# 技能文件
+skills/
+
+# 配置文件
+config/bilibili_cookies.json
+
 # 临时文件
 *.tmp
 *.temp
 *.swp
 *.swo
-
-# 日志文件
-*.log
+.DS_Store
 
 # 状态文件
-*.json
-!config/model-pools.json
-!config/skill-learning-schedule.json
+.openclaw/
+.clayhub/
+.skill-install-*.json
+
+# 脚本（保留核心脚本）
+scripts/git-auto-backup.sh
+scripts/cleanup-*.sh
 
 # 其他
-.DS_Store
 .env
 .env.*
